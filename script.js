@@ -1,101 +1,34 @@
 (async function runENASR() {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // --- HELPER: SHOW STATUS OVERLAY ON PAGE ---
-  function showStatus(msg) {
-    let box = document.getElementById("enasr-status-box");
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "enasr-status-box";
-      box.style.cssText = "position:fixed;top:20px;right:20px;z-index:999999;background:#111827;color:#fff;padding:16px 20px;border-radius:8px;font-family:sans-serif;font-size:14px;box-shadow:0 10px 25px rgba(0,0,0,0.5);max-width:380px;border:1px solid #374151;";
-      document.body.appendChild(box);
-    }
-    box.innerHTML = `<strong style="color:#60a5fa;display:block;margin-bottom:6px;">✈️ eNASR Tool</strong>${msg}`;
-  }
-
-  // --- PHASE 1: CHECK IF WE ARE ON RESULTS PAGE & COMBINE ALL REPORTS ---
+  // --- PHASE 1: IF REPORT LINKS ARE VISIBLE -> OPEN EACH IN A NEW TAB TO PRINT ---
   const allLinks = Array.from(document.querySelectorAll("a"));
   const reportLinks = allLinks.filter((a) => {
     const text = (a.innerText || a.textContent || "").toLowerCase();
     const href = (a.href || "").toLowerCase();
     return (
-      href.includes("nasr") ||
-      href.includes("report") ||
-      href.includes("view") ||
-      text.includes("location") ||
-      text.includes("runway") ||
-      text.includes("linear") ||
-      text.includes("print") ||
-      text.includes("detail")
+      (href.includes("nasr") || href.includes("report") || href.includes("javascript")) &&
+      (text.includes("location") || text.includes("runway") || text.includes("linear") || text.includes("print") || text.includes("detail"))
     );
   });
 
   if (reportLinks.length > 0) {
-    showStatus(`Found <b>${reportLinks.length}</b> report section(s). Fetching data...`);
+    alert(`Found ${reportLinks.length} report link(s). Opening each in a new tab...`);
 
-    let combinedHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>eNASR Combined Airport Report</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; color: #000; background: #fff; }
-          .report-section { page-break-after: always; margin-bottom: 40px; border-bottom: 2px solid #ccc; padding-bottom: 20px; }
-          .report-section:last-child { page-break-after: auto; border-bottom: none; }
-          @media print {
-            .no-print { display: none !important; }
-            .report-section { page-break-after: always; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="no-print" style="background:#e0f2fe;padding:12px;margin-bottom:20px;border-radius:6px;font-family:sans-serif;color:#0369a1;">
-          <strong>eNASR Combined View</strong> — All ${reportLinks.length} report sections loaded.
-          <button onclick="window.print()" style="margin-left:15px;padding:6px 14px;background:#0284c7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">Print / Save All as PDF</button>
-        </div>
-    `;
-
-    let loadedCount = 0;
     for (let i = 0; i < reportLinks.length; i++) {
       const link = reportLinks[i];
-      const url = link.href;
-      const title = link.innerText.trim() || `Report Section ${i + 1}`;
 
-      showStatus(`Downloading section ${i + 1} of ${reportLinks.length}: <br><b>${title}</b>`);
-
-      try {
-        if (url && !url.startsWith("javascript:")) {
-          const resp = await fetch(url);
-          const htmlText = await resp.text();
-          
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(htmlText, "text/html");
-          const mainContent = doc.body ? doc.body.innerHTML : htmlText;
-
-          combinedHtml += `<div class="report-section"><h2>${title}</h2>${mainContent}</div>`;
-          loadedCount++;
-        }
-      } catch (err) {
-        console.error("Error fetching report link:", err);
-      }
-      await sleep(200);
-    }
-
-    combinedHtml += `</body></html>`;
-
-    if (loadedCount > 0) {
-      showStatus(`Opening combined print view...`);
-      const printWin = window.open("", "_blank");
-      if (printWin) {
-        printWin.document.open();
-        printWin.document.write(combinedHtml);
-        printWin.document.close();
-        setTimeout(() => printWin.print(), 800);
+      if (link.href && link.href.startsWith("javascript:")) {
+        link.click();
       } else {
-        alert("Pop-up blocked! Look at your browser address bar and click 'Always allow pop-ups' for enasr.faa.gov.");
+        const win = window.open(link.href, `_blank_rpt_${i}`);
+        if (win) {
+          win.addEventListener("load", () => {
+            setTimeout(() => win.print(), 500);
+          });
+        }
       }
-    } else {
-      showStatus("Could not extract report contents automatically.");
+      await sleep(1500); // 1.5 second pause between popups to let tabs load smoothly
     }
     return;
   }
@@ -105,7 +38,6 @@
   if (!airportId) return;
 
   const id = airportId.trim().toUpperCase();
-  showStatus(`Filling search form for <b>${id}</b>...`);
 
   // 1. Select Next Cycle
   const selects = Array.from(document.querySelectorAll("select"));
@@ -129,7 +61,7 @@
 
   await sleep(300);
 
-  // 3. Fill Airport ID Box
+  // 3. Enter Airport ID
   const inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type])"));
   const idInput = inputs.find(i => i.name.toLowerCase().includes("airport") || i.id.toLowerCase().includes("airport") || i.name.toLowerCase().includes("id")) || inputs[0];
 
@@ -137,22 +69,17 @@
     idInput.value = id;
     idInput.dispatchEvent(new Event("input", { bubbles: true }));
     idInput.dispatchEvent(new Event("change", { bubbles: true }));
-  } else {
-    showStatus("⚠️ Airport ID box not found automatically. Type ID manually and click Search.");
-    return;
   }
 
-  // 4. Click Search Button
+  // 4. Click Search
   const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a.btn"));
   const searchBtn = buttons.find(b => {
     const val = (b.value || b.innerText || "").toLowerCase();
-    return val.includes("search") || val.includes("view") || val.includes("find") || b.type === "submit";
+    return val.includes("search") || val.includes("view") || val.includes("submit") || b.type === "submit";
   }) || buttons[0];
 
   if (searchBtn) {
     searchBtn.click();
-    showStatus(`Searching for <b>${id}</b>.<br><br>👉 <i>Once search results display on screen, click your bookmarklet ONE MORE TIME to gather and print all reports!</i>`);
-  } else {
-    showStatus("⚠️ Search button not found. Click Search manually.");
+    alert(`Submitted search for ${id}. Once results load, click the bookmarklet again to open all report pages.`);
   }
 })();
