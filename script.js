@@ -1,77 +1,85 @@
 (async function runENASR() {
-  // 1. Ask for Airport ID
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // --- PHASE 1: IF REPORT LINKS ARE ALREADY VISIBLE ON PAGE, PRINT THEM ---
+  const reportLinks = Array.from(document.querySelectorAll("a")).filter((a) => {
+    const text = (a.innerText || "").toLowerCase();
+    const href = (a.href || "").toLowerCase();
+    return (
+      (href.includes("nasr") || href.includes("report") || href.includes("javascript")) &&
+      (text.includes("location") || text.includes("runway") || text.includes("linear") || text.includes("print"))
+    );
+  });
+
+  if (reportLinks.length > 0) {
+    alert(`Found ${reportLinks.length} report link(s). Opening print windows...`);
+    for (let i = 0; i < reportLinks.length; i++) {
+      const reportUrl = reportLinks[i].href;
+      if (reportUrl.startsWith("javascript:")) {
+        reportLinks[i].click();
+      } else {
+        const win = window.open(reportUrl, `_blank_rpt_${i}`);
+        if (win) {
+          win.addEventListener("load", () => win.print());
+        }
+      }
+      await sleep(1500);
+    }
+    return;
+  }
+
+  // --- PHASE 2: AUTOMATE FORM ENTRY IF NO LINKS ARE VISIBLE YET ---
   const airportId = prompt("Enter Airport Identifier (e.g. BGM):");
   if (!airportId) return;
 
-  const idUpper = airportId.trim().toUpperCase();
+  const id = airportId.trim().toUpperCase();
 
-  // Helper function to delay actions (gives eNASR time to render DOM changes)
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // 1. Cycle Dropdown -> Select Next Cycle (usually 2nd option)
+  const selects = Array.from(document.querySelectorAll("select"));
+  const cycleSelect = selects.find(s => s.name.toLowerCase().includes("cycle") || s.id.toLowerCase().includes("cycle")) || selects[0];
+  if (cycleSelect && cycleSelect.options.length > 1) {
+    cycleSelect.selectedIndex = 1; 
+    cycleSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
-  try {
-    console.log(`Starting automated extraction for ${idUpper}...`);
-
-    // 2. Select 'Next Cycle' & 'Airport' drop-downs
-    // Note: Replace these selector IDs with the actual DOM element IDs from eNASR
-    const cycleSelect = document.querySelector("select[name*='cycle']");
-    if (cycleSelect && cycleSelect.options.length > 1) {
-      cycleSelect.selectedIndex = 1; // Selects next cycle
-      cycleSelect.dispatchEvent(new Event("change"));
-    }
-
-    const sourceSelect = document.querySelector("select[name*='source']");
-    if (sourceSelect) {
-      sourceSelect.value = "AIRPORT"; // Adjust value string based on site HTML
-      sourceSelect.dispatchEvent(new Event("change"));
-    }
-
-    // 3. Input Airport ID into the search field
-    const inputField = document.querySelector("input[name*='airport']");
-    if (inputField) {
-      inputField.value = idUpper;
-      inputField.dispatchEvent(new Event("input"));
-      
-      // Click search button
-      const searchBtn = document.querySelector("button[type='submit'], input[type='submit']");
-      if (searchBtn) searchBtn.click();
-    }
-
-    alert(`Navigated to ${idUpper}. Please wait for results to load...`);
-    await sleep(3000); // Wait 3 seconds for search results
-
-    // 4. Extract all generated report URLs (Location, Linear Runway, etc.)
-    // Scrapes all relevant print/report links dynamically
-    const reportLinks = Array.from(document.querySelectorAll("a"))
-      .filter((a) => {
-        const text = a.innerText.toLowerCase();
-        const href = a.href;
-        return (
-          href.includes("nasr") &&
-          (text.includes("location") || text.includes("runway") || text.includes("report"))
-        );
-      })
-      .map((a) => a.href);
-
-    if (reportLinks.length === 0) {
-      alert("No report links found for this ID. Ensure search results are loaded.");
-      return;
-    }
-
-    // 5. Sequentially open each report and trigger the browser Print dialogue
-    for (let i = 0; i < reportLinks.length; i++) {
-      const reportUrl = reportLinks[i];
-      const printWin = window.open(reportUrl, `_blank_report_${i}`);
-
-      if (printWin) {
-        printWin.addEventListener("load", () => {
-          printWin.print(); // Triggers Print -> "Save as PDF"
-        });
+  // 2. Data Source -> Select "Airport"
+  const sourceSelect = selects.find(s => s.name.toLowerCase().includes("source") || s.id.toLowerCase().includes("source")) || selects[1];
+  if (sourceSelect) {
+    for (let opt of sourceSelect.options) {
+      if (opt.text.toLowerCase().includes("airport") || opt.value.toLowerCase().includes("airport")) {
+        sourceSelect.value = opt.value;
+        sourceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        break;
       }
-      await sleep(1500); // Pause between popups to avoid browser popup blocking
     }
+  }
 
-  } catch (err) {
-    console.error("Error executing eNASR helper:", err);
-    alert("An error occurred during automation. Check browser console.");
+  await sleep(400);
+
+  // 3. Airport ID Box -> Input Identifier
+  const inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type])"));
+  const idInput = inputs.find(i => i.name.toLowerCase().includes("airport") || i.id.toLowerCase().includes("airport") || i.name.toLowerCase().includes("id")) || inputs[0];
+
+  if (idInput) {
+    idInput.value = id;
+    idInput.dispatchEvent(new Event("input", { bubbles: true }));
+    idInput.dispatchEvent(new Event("change", { bubbles: true }));
+  } else {
+    alert("Airport ID box not detected automatically. Please click inside the text box and try again.");
+    return;
+  }
+
+  // 4. Click Search / Submit Button
+  const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a.btn"));
+  const searchBtn = buttons.find(b => {
+    const val = (b.value || b.innerText || "").toLowerCase();
+    return val.includes("search") || val.includes("view") || val.includes("submit") || b.type === "submit";
+  }) || buttons[0];
+
+  if (searchBtn) {
+    searchBtn.click();
+    alert(`Form submitted for ${id}. Once results appear, click the bookmarklet again to open all print pages.`);
+  } else {
+    alert("Search button not found. Please click Search manually.");
   }
 })();
